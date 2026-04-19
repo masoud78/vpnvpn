@@ -1,70 +1,68 @@
-# This workflow will upload a Python Package to PyPI when a release is created
-# For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-python#publishing-to-package-registries
-
-# This workflow uses actions that are not certified by GitHub.
-# They are provided by a third-party and are governed by
-# separate terms of service, privacy policy, and support
-# documentation.
-
-name: Upload Python Package
+name: Armenia V2Ray Config Collector
 
 on:
-  release:
-    types: [published]
-
-permissions:
-  contents: read
+  schedule:
+    - cron: "0 */4 * * *"   # Every 4 hours: 00:00, 04:00, 08:00, 12:00, 16:00, 20:00 UTC
+  workflow_dispatch:
+    inputs:
+      tcp_workers:
+        description: "Concurrent TCP workers (default 300)"
+        default: "300"
+      tcp_timeout:
+        description: "TCP timeout in seconds (default 1.5)"
+        default: "1.5"
 
 jobs:
-  release-build:
+  collect:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    # --- FIX ADDED HERE ---
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+    # ----------------------
+
+    permissions:
+      contents: write
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
         with:
-          python-version: "3.x"
+          python-version: "3.11"
 
-      - name: Build release distributions
-        run: |
-          # NOTE: put your own distribution build steps here.
-          python -m pip install build
-          python -m build
+      - name: Install dependencies
+        run: pip install requests
 
-      - name: Upload distributions
+      - name: Run collector
+        run: python collect_armenia_configs.py
+        env:
+          SCAN_WORKERS: ${{ github.event.inputs.tcp_workers || '300' }}
+          SCAN_TCP_TO:  ${{ github.event.inputs.tcp_timeout || '1.5' }}
+
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: release-dists
-          path: dist/
+          name: armenia-configs-${{ github.run_id }}
+          path: |
+            working_armenia_configs.txt
+            working_armenia_configs.json
+            working_armenia_configs_base64.txt
+            by_protocol/
+          retention-days: 7
 
-  pypi-publish:
-    runs-on: ubuntu-latest
-    needs:
-      - release-build
-    permissions:
-      # IMPORTANT: this permission is mandatory for trusted publishing
-      id-token: write
-
-    # Dedicated environments with protections for publishing are strongly recommended.
-    # For more information, see: https://docs.github.com/en/actions/deployment/targeting-different-environments/using-environments-for-deployment#deployment-protection-rules
-    environment:
-      name: pypi
-      # OPTIONAL: uncomment and update to include your PyPI project URL in the deployment status:
-      # url: https://pypi.org/p/YOURPROJECT
-      #
-      # ALTERNATIVE: if your GitHub Release name is the PyPI project version string
-      # ALTERNATIVE: exactly, uncomment the following line instead:
-      # url: https://pypi.org/project/YOURPROJECT/${{ github.event.release.name }}
-
-    steps:
-      - name: Retrieve release distributions
-        uses: actions/download-artifact@v4
-        with:
-          name: release-dists
-          path: dist/
-
-      - name: Publish release distributions to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          packages-dir: dist/
+      - name: Commit results to repo
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add \
+            working_armenia_configs.txt \
+            working_armenia_configs.json \
+            working_armenia_configs_base64.txt \
+            by_protocol/
+          git diff --cached --quiet \
+            || git commit -m "chore: update Armenia configs $(date -u +'%Y-%m-%d %H:%M UTC')"
+          git push
